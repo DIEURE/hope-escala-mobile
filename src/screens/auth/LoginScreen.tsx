@@ -1,4 +1,3 @@
-// src/screens/auth/LoginScreen.js
 import React, { useState } from 'react';
 import {
   View,
@@ -19,25 +18,36 @@ import { useAuth } from '../../contexts/AuthContext';
 export default function LoginScreen() {
   const { login } = useAuth();
 
-  const [email, setEmail] = useState('');
-  const [senha, setSenha] = useState('');
-  const [mostrarSenha, setMostrarSenha] = useState(false);
-  const [carregando, setCarregando] = useState(false);
+  const [email, setEmail] = useState<string>('');
+  const [senha, setSenha] = useState<string>('');
+  const [mostrarSenha, setMostrarSenha] = useState<boolean>(false);
+  const [carregando, setCarregando] = useState<boolean>(false);
+
+  const exibirAlerta = (titulo: string, mensagem: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${titulo}: ${mensagem}`);
+    } else {
+      Alert.alert(titulo, mensagem);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !senha.trim()) {
-      Alert.alert('Campos obrigatórios', 'Por favor, informe seu e-mail e sua senha.');
+      exibirAlerta('Campos obrigatórios', 'Por favor, informe seu e-mail e sua senha.');
       return;
     }
 
     try {
       setCarregando(true);
       await login(email.trim(), senha);
-      // O AppNavigator detectará signed: true automaticamente e abrirá as tabs
-    } catch (error) {
+      // Ao concluir, signed: true no AuthContext faz o AppNavigator trocar para as Tabs
+    } catch (error: any) {
       console.error('Erro no login mobile:', error);
-      const msg = error.response?.data?.message || 'E-mail ou senha incorretos. Verifique suas credenciais.';
-      Alert.alert('Falha no Acesso', msg);
+      const msg =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        'E-mail ou senha incorretos. Verifique suas credenciais.';
+      exibirAlerta('Falha no Acesso', msg);
     } finally {
       setCarregando(false);
     }
@@ -53,7 +63,7 @@ export default function LoginScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Cabeçalho / Identidade Visual */}
+          {/* Identidade Visual */}
           <View style={styles.header}>
             <View style={styles.logoBadge}>
               <Text style={styles.logoBadgeText}>H</Text>
@@ -167,11 +177,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
-    shadowColor: '#FF6B00',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 6px 12px rgba(255, 107, 0, 0.4)',
+      },
+      default: {
+        shadowColor: '#FF6B00',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.4,
+        shadowRadius: 12,
+        elevation: 8,
+      },
+    }),
   },
   logoBadgeText: {
     color: '#ffffff',

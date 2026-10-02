@@ -1,43 +1,50 @@
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// DICA: 
-// Se for produção/Render: 'https://api.hopeescalapro.com.br' (ou seu subdomínio no Render)
-// Se for celular físico no Wi-Fi local: 'http://SEU_IP_LOCAL:8080/api'
-// Se for Emulador Android local: 'http://10.0.2.2:8080/api'
-const BASE_URL = 'https://api.hopeescalapro.com.br'; // Verifique se esta é a URL exata da sua API
+const BASE_URL = 'https://api.hopeescalapro.com.br';
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000, // 30 segundos (evita Network Error durante o cold start do Render)
+  timeout: 60000, // 60 segundos para acomodar o spin-up do Render
   headers: {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   },
 });
 
-// Interceptor para injetar o JWT automaticamente
 api.interceptors.request.use(
-  async (config) => {
+  async (config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> => {
     try {
-      const token = await AsyncStorage.getItem('@hope_token');
+      let token = await AsyncStorage.getItem('@hope_token');
+
+      if (!token) {
+        token = await AsyncStorage.getItem('@token');
+      }
+
+      if (!token && typeof window !== 'undefined' && window.localStorage) {
+        token =
+          window.localStorage.getItem('@hope_token') ||
+          window.localStorage.getItem('@token') ||
+          window.localStorage.getItem('token');
+      }
+
       if (token) {
-        // Remove possíveis aspas residuais se foi salvo com JSON.stringify
         const tokenLimpo = token.replace(/^"(.*)"$/, '$1').trim();
-        config.headers.Authorization = `Bearer ${tokenLimpo}`;
+        config.headers.set('Authorization', `Bearer ${tokenLimpo}`);
+      } else {
+        console.warn('⚠️ Requisição enviada sem token JWT:', config.url);
       }
     } catch (e) {
       console.warn('Erro ao carregar token no interceptor:', e);
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error: AxiosError) => Promise.reject(error)
 );
 
-// Interceptor de resposta com log detalhado de erro de rede
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  (error: AxiosError) => {
     if (!error.response) {
       console.error('🌐 FALHA DE CONEXÃO/REDE:', {
         url: error.config?.url,
