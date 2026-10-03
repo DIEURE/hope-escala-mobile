@@ -31,7 +31,7 @@ export type StatusPresenca = 'CONFIRMADO' | 'RECUSADO' | 'PENDENTE';
 export interface MinhaEscalaItemDTO {
   id: number;
   escalaId: number;
-  data: string; // YYYY-MM-DD
+  dataEscala: string; // yyyy-MM-dd
   diaSemana?: string;
   tipoCulto: 'MANHA' | 'NOITE' | string;
   nomeCulto?: string | null;
@@ -57,6 +57,9 @@ export default function MinhasEscalasScreen() {
       const response = await api.get<any>('/escala-musicos/minhas-escalas');
       const dados = response.data;
 
+// 🟢 ADICIONE ESTAS DUAS LINHAS:
+console.log('>>> PAYLOAD BRUTO DO PRIMEIRO ITEM:');
+console.log(dados && dados.length > 0 ? dados[0] : 'ARRAY VAZIO');
       if (Array.isArray(dados)) {
         const formatados: MinhaEscalaItemDTO[] = dados.map((item: any, idx: number) => {
           let statusNormalizado: StatusPresenca = 'PENDENTE';
@@ -66,25 +69,47 @@ export default function MinhasEscalasScreen() {
             statusNormalizado = 'RECUSADO';
           }
 
+          // Prioridade para dataEscala (vindo do EscalaMusicoResponseDTO)
+          let dataResolvida = '';
+          if (typeof item.dataEscala === 'string') {
+            dataResolvida = item.dataEscala;
+          } else if (Array.isArray(item.dataEscala) && item.dataEscala.length >= 3) {
+            const ano = item.dataEscala[0];
+            const mes = String(item.dataEscala[1]).padStart(2, '0');
+            const dia = String(item.dataEscala[2]).padStart(2, '0');
+            dataResolvida = `${ano}-${mes}-${dia}`;
+          } else {
+            dataResolvida = item.data || item.dataCulto || '';
+          }
+
+          const horarioResolvido =
+            item.horarioNoite || item.horarioManha || item.horario || item.hora || '19:00';
+
+          const nomeCultoResolvido =
+            item.nomeCultoNoite ||
+            item.nomeCultoManha ||
+            item.nomeCulto ||
+            'Culto de Celebração';
+
           return {
             id: item.id || idx,
             escalaId: item.escalaId || item.id,
-            data: item.data || item.dataCulto || '',
+            dataEscala: dataResolvida,
             diaSemana: item.diaSemana || 'DOMINGO',
-            tipoCulto: item.tipoCulto || (item.periodo === 'MANHA' ? 'MANHA' : 'NOITE'),
-            nomeCulto: item.nomeCulto || (item.tipoCulto === 'MANHA' ? 'Culto Matutino' : 'Culto Noturno'),
-            horario: item.horario || item.hora || (item.tipoCulto === 'MANHA' ? '09:00' : '19:00'),
-            instrumentoOuFuncao: item.instrumento || item.funcao || item.nomeInstrumento || 'Voluntário',
+            tipoCulto: item.horarioManha ? 'MANHA' : 'NOITE',
+            nomeCulto: nomeCultoResolvido,
+            horario: String(horarioResolvido),
+            instrumentoOuFuncao: item.instrumento || 'Voluntário',
             ministro: item.ministro || item.nomeMinistro,
             status: statusNormalizado,
             observacao: item.observacao,
           };
         });
 
-        // Ordenação das escalas por data em ordem crescente (ASC)
+        // Ordenação rigorosa por data crescente (ASC: mais próximos primeiro)
         const ordenadosAsc = formatados.sort((a, b) => {
-          const timestampA = a.data ? new Date(a.data).getTime() : 0;
-          const timestampB = b.data ? new Date(b.data).getTime() : 0;
+          const timestampA = a.dataEscala ? new Date(a.dataEscala).getTime() : 0;
+          const timestampB = b.dataEscala ? new Date(b.dataEscala).getTime() : 0;
           return timestampA - timestampB;
         });
 
@@ -169,13 +194,29 @@ export default function MinhasEscalasScreen() {
     navigation.navigate('SalaEnsaio', { escalaId: escala.escalaId });
   };
 
-  const extrairData = (dataStr: string) => {
-    if (!dataStr) return { dia: '--', mes: '---' };
-    const partes = dataStr.split('-');
-    const dia = partes[2] || '--';
+const extrairData = (dataVal: any) => {
+    if (!dataVal) return { dia: '--', mes: '---' };
+
     const meses = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
-    const idx = parseInt(partes[1], 10) - 1;
-    return { dia, mes: meses[idx] || 'DOM' };
+
+    // Se vier array do Jackson [2026, 10, 4]
+    if (Array.isArray(dataVal) && dataVal.length >= 3) {
+      const dia = String(dataVal[2]).padStart(2, '0');
+      const mesIdx = Number(dataVal[1]) - 1;
+      return { dia, mes: meses[mesIdx] || 'DOM' };
+    }
+
+    // Se vier string "2026-10-04"
+    if (typeof dataVal === 'string') {
+      const partes = dataVal.split('T')[0].split('-');
+      if (partes.length >= 3) {
+        const dia = partes[2].padStart(2, '0');
+        const mesIdx = parseInt(partes[1], 10) - 1;
+        return { dia, mes: meses[mesIdx] || 'DOM' };
+      }
+    }
+
+    return { dia: '--', mes: '---' };
   };
 
   const renderBadgeStatus = (status: StatusPresenca) => {
@@ -205,7 +246,7 @@ export default function MinhasEscalasScreen() {
   };
 
   const renderItem = ({ item }: { item: MinhaEscalaItemDTO }) => {
-    const { dia, mes } = extrairData(item.data);
+    const { dia, mes } = extrairData(item.dataEscala);
     const isManha = item.tipoCulto === 'MANHA';
     const estaProcessando = processandoId === item.id;
 
@@ -426,12 +467,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
   },
-  dataBox: {
-    width: 48,
-    height: 48,
+    dataBox: {
+    minWidth: 52,
+    minHeight: 52,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
     borderRadius: 12,
     backgroundColor: '#0f172a',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#FF6B00',
     alignItems: 'center',
     justifyContent: 'center',
@@ -440,14 +483,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     color: '#FF6B00',
-    lineHeight: 20,
+    textAlign: 'center',
+    includeFontPadding: false, // 🟢 Essencial para Android não cortar o número
   },
   dataMes: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
     color: '#f97316',
+    textAlign: 'center',
     letterSpacing: 0.5,
+    marginTop: 1,
+    includeFontPadding: false,
   },
+
   headerInfo: {
     flex: 1,
   },

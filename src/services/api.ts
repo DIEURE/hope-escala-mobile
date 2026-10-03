@@ -15,17 +15,21 @@ const api = axios.create({
 api.interceptors.request.use(
   async (config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> => {
     try {
-      let token = await AsyncStorage.getItem('@hope_token');
+      // 1. Tenta buscar em todas as chaves comuns do AsyncStorage
+      const chaves = ['@hope_token', '@token', '@hope_escala_token', 'token', '@HopeEscala:token'];
+      let token: string | null = null;
 
-      if (!token) {
-        token = await AsyncStorage.getItem('@token');
+      for (const k of chaves) {
+        token = await AsyncStorage.getItem(k);
+        if (token) break;
       }
 
+      // 2. Fallback para Expo Web / localStorage
       if (!token && typeof window !== 'undefined' && window.localStorage) {
-        token =
-          window.localStorage.getItem('@hope_token') ||
-          window.localStorage.getItem('@token') ||
-          window.localStorage.getItem('token');
+        for (const k of chaves) {
+          token = window.localStorage.getItem(k);
+          if (token) break;
+        }
       }
 
       if (token) {
@@ -41,6 +45,7 @@ api.interceptors.request.use(
   },
   (error: AxiosError) => Promise.reject(error)
 );
+
 
 api.interceptors.response.use(
   (response) => response,

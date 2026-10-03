@@ -2,277 +2,281 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   StyleSheet,
-  Platform,
-  ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  Users,
   CalendarDays,
   Clock,
-  Users,
-  ChevronLeft,
-  ChevronRight,
   Sun,
   Moon,
+  ChevronLeft,
+  ChevronRight,
   Music,
-  UserCheck,
+  Mic,
+  AlertCircle,
+  Headphones,
 } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../services/api';
 
-export interface MusicoEscaladoDTO {
-  id: number;
+interface VoluntarioEscalaDTO {
   usuarioId: number;
   nome: string;
-  instrumento?: string | null;
-  funcao?: string | null;
-  confirmado?: boolean | null;
+  instrumento: string;
 }
 
-export interface CultoEscalaDTO {
+interface EscalaMesDTO {
   id: number;
-  tipoCulto: 'MANHA' | 'NOITE' | string;
-  nomeCulto?: string | null;
-  horario?: string | null;
-  ministroLouvor?: string | null;
-  musicos: MusicoEscaladoDTO[];
-}
-
-export interface DomingoEscalaDTO {
-  id: number;
-  data: string; // YYYY-MM-DD
-  diaNumero: string;
-  mesAbreviado: string;
-  cultos: CultoEscalaDTO[];
+  data: string; // "yyyy-MM-dd"
+  observacao?: string;
+  voluntarios: VoluntarioEscalaDTO[];
 }
 
 export default function EscalaMensalScreen() {
-  const { user } = useAuth();
+  const { user, signed } = useAuth();
+  const navigation = useNavigation<any>();
 
-  const dataAtual = new Date();
-  const [ano, setAno] = useState<number>(dataAtual.getFullYear());
-  const [mes, setMes] = useState<number>(dataAtual.getMonth() + 1);
+  const hoje = new Date();
+  const [mesAlvo, setMesAlvo] = useState<number>(hoje.getMonth()); // 0 a 11
+  const [anoAlvo, setAnoAlvo] = useState<number>(hoje.getFullYear());
 
-  const [domingos, setDomingos] = useState<DomingoEscalaDTO[]>([]);
+  const [escalas, setEscalas] = useState<EscalaMesDTO[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
   const [recarregando, setRecarregando] = useState<boolean>(false);
 
-  const nomesMeses = [
-    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  const nomesMesesCompletos = [
+    'Janeiro',
+    'Fevereiro',
+    'Março',
+    'Abril',
+    'Maio',
+    'Junho',
+    'Julho',
+    'Agosto',
+    'Setembro',
+    'Outubro',
+    'Novembro',
+    'Dezembro',
   ];
 
-  const buscarEscalaMes = useCallback(async () => {
-    try {
-      setCarregando(true);
-      // Chamada da API para a escala completa do mês
-      const response = await api.get<any>('/escalas/mes', {
-        params: {
-          ano,
-          mes,
-          empresaId: user?.empresaId,
-        },
-      });
-
-      const dados = response.data;
-      
-      // Mapeia caso venha como lista de escalas ou agrupada por domingos
-      if (Array.isArray(dados)) {
-        const domingosFormatados: DomingoEscalaDTO[] = dados.map((item: any, idx: number) => {
-          const partesData = String(item.data || item.dataEscala || '').split('-');
-          const diaNum = partesData[2] || String(idx + 1).padStart(2, '0');
-          const mesNum = parseInt(partesData[1] || String(mes), 10) - 1;
-          const mesesAbrev = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
-
-          return {
-            id: item.id || idx,
-            data: item.data || item.dataEscala,
-            diaNumero: diaNum,
-            mesAbreviado: mesesAbrev[mesNum] || 'DOM',
-            cultos: item.cultos || [
-              ...(item.horarioNoite ? [{
-                id: item.id * 10 + 2,
-                tipoCulto: 'NOITE',
-                nomeCulto: item.nomeCultoNoite || 'Culto de Celebração',
-                horario: item.horarioNoite,
-                ministroLouvor: item.ministroNoite || item.ministro,
-                musicos: item.musicosNoite || item.musicos || [],
-              }] : []),
-              ...(item.horarioManha ? [{
-                id: item.id * 10 + 1,
-                tipoCulto: 'MANHA',
-                nomeCulto: item.nomeCultoManha || 'Culto Matutino',
-                horario: item.horarioManha,
-                ministroLouvor: item.ministroManha,
-                musicos: item.musicosManha || [],
-              }] : []),
-            ],
-          };
-        });
-
-        setDomingos(domingosFormatados);
-      } else {
-        setDomingos([]);
-      }
-    } catch (error) {
-      console.warn('Erro ao carregar escala do mês:', error);
-      setDomingos([]);
-    } finally {
-      setCarregando(false);
-      setRecarregando(false);
-    }
-  }, [ano, mes, user?.empresaId]);
-
-  useEffect(() => {
-    buscarEscalaMes();
-  }, [buscarEscalaMes]);
-
   const mesAnterior = () => {
-    if (mes === 1) {
-      setMes(12);
-      setAno((prev) => prev - 1);
+    if (mesAlvo === 0) {
+      setMesAlvo(11);
+      setAnoAlvo((prev) => prev - 1);
     } else {
-      setMes((prev) => prev - 1);
+      setMesAlvo((prev) => prev - 1);
     }
   };
 
   const proximoMes = () => {
-    if (mes === 12) {
-      setMes(1);
-      setAno((prev) => prev + 1);
+    if (mesAlvo === 11) {
+      setMesAlvo(0);
+      setAnoAlvo((prev) => prev + 1);
     } else {
-      setMes((prev) => prev + 1);
+      setMesAlvo((prev) => prev + 1);
     }
   };
 
-  const onRefresh = () => {
-    setRecarregando(true);
-    buscarEscalaMes();
+  const normalizarData = (dataRaw: any): string => {
+    if (!dataRaw) return '';
+
+    if (typeof dataRaw === 'string') {
+      return dataRaw.split('T')[0];
+    }
+
+    if (Array.isArray(dataRaw) && dataRaw.length >= 3) {
+      const a = dataRaw[0];
+      const m = String(dataRaw[1]).padStart(2, '0');
+      const d = String(dataRaw[2]).padStart(2, '0');
+      return `${a}-${m}-${d}`;
+    }
+
+    return '';
   };
 
-  const renderDomingo = ({ item }: { item: DomingoEscalaDTO }) => {
-    return (
-      <View style={styles.domingoCard}>
-        {/* CABEÇALHO DO DOMINGO */}
-        <View style={styles.domingoHeader}>
-          <View style={styles.dataBadge}>
-            <Text style={styles.dataBadgeDia}>{item.diaNumero}</Text>
-            <Text style={styles.dataBadgeMes}>{item.mesAbreviado}</Text>
-          </View>
-          <View style={styles.domingoHeaderInfo}>
-            <Text style={styles.domingoTitulo}>Domingo de Louvor</Text>
-            <Text style={styles.domingoSubtitulo}>{item.data}</Text>
-          </View>
-        </View>
+  const formatarDataBox = (dataStr?: string) => {
+    if (!dataStr || typeof dataStr !== 'string') {
+      return { dia: '--', mes: 'DOM' };
+    }
 
-        {/* LISTAGEM DOS CULTOS DE DOMINGO */}
-        <View style={styles.cultosContainer}>
-          {item.cultos && item.cultos.length > 0 ? (
-            item.cultos.map((culto) => {
-              const isManha = culto.tipoCulto === 'MANHA';
-              return (
-                <View key={culto.id} style={styles.cultoCard}>
-                  {/* TÍTULO DO CULTO */}
-                  <View style={styles.cultoCardHeader}>
-                    <View style={styles.cultoIconRow}>
-                      {isManha ? (
-                        <Sun size={15} color="#ea580c" />
-                      ) : (
-                        <Moon size={15} color="#FF6B00" />
-                      )}
-                      <Text style={styles.cultoNome}>
-                        {culto.nomeCulto || (isManha ? 'Culto Matutino' : 'Culto Noturno')}
-                      </Text>
-                    </View>
-                    {Boolean(culto.horario) && (
-                      <View style={styles.horarioBadge}>
-                        <Clock size={11} color="#475569" />
-                        <Text style={styles.horarioTexto}>{String(culto.horario).substring(0, 5)}</Text>
-                      </View>
-                    )}
-                  </View>
+    const partes = dataStr.split('-');
+    if (partes.length < 3) {
+      return { dia: '--', mes: 'DOM' };
+    }
 
-                  {/* MINISTRO RESPONSÁVEL */}
-                  {Boolean(culto.ministroLouvor) && (
-                    <View style={styles.ministroRow}>
-                      <UserCheck size={14} color="#16a34a" />
-                      <Text style={styles.ministroTexto}>
-                        Ministro(a): <Text style={{ fontWeight: '700', color: '#0f172a' }}>{culto.ministroLouvor}</Text>
-                      </Text>
-                    </View>
-                  )}
+    const dia = partes[2] || '--';
+    const meses = [
+      'JAN',
+      'FEV',
+      'MAR',
+      'ABR',
+      'MAI',
+      'JUN',
+      'JUL',
+      'AGO',
+      'SET',
+      'OUT',
+      'NOV',
+      'DEZ',
+    ];
 
-                  {/* MÚSICOS E VOZES */}
-                  {culto.musicos && culto.musicos.length > 0 ? (
-                    <View style={styles.musicosGrid}>
-                      {culto.musicos.map((m) => (
-                        <View key={m.id || m.usuarioId} style={styles.musicoChip}>
-                          <Music size={11} color="#64748b" />
-                          <Text style={styles.musicoNome}>{m.nome}</Text>
-                          {Boolean(m.instrumento || m.funcao) && (
-                            <Text style={styles.musicoFuncao}>
-                              • {m.instrumento || m.funcao}
-                            </Text>
-                          )}
-                        </View>
-                      ))}
-                    </View>
-                  ) : (
-                    <Text style={styles.semMusicosTexto}>Nenhum voluntário escalado ainda.</Text>
-                  )}
-                </View>
-              );
-            })
-          ) : (
-            <Text style={styles.semMusicosTexto}>Nenhum culto configurado para este domingo.</Text>
-          )}
-        </View>
-      </View>
-    );
+    const mesIndex = parseInt(partes[1], 10) - 1;
+    const mes = mesIndex >= 0 && mesIndex < 12 ? meses[mesIndex] : 'DOM';
+
+    return { dia, mes };
+  };
+
+  const carregarEscalaMensal = useCallback(async () => {
+    if (!signed) return;
+    try {
+      setCarregando(true);
+
+      const depId =
+        user?.departamentoId && user.departamentoId !== 1
+          ? user.departamentoId
+          : 2;
+
+      const response = await api.get<any[]>('/escalas/mes', {
+        params: {
+          departamentoId: depId,
+          mes: mesAlvo + 1,
+          ano: anoAlvo,
+        },
+      });
+
+      const dados = Array.isArray(response.data) ? response.data : [];
+
+      const listaNormalizada: EscalaMesDTO[] = dados
+        .map((item: any) => {
+          const dataBruta =
+            item?.data || item?.dataEscala || item?.dataHora || '';
+          const dataResolvida = normalizarData(dataBruta);
+
+          return {
+            id: item?.id || Math.random(),
+            data: dataResolvida,
+            observacao: item?.observacao || item?.nome || '',
+            voluntarios: Array.isArray(item?.voluntarios)
+              ? item.voluntarios.map((v: any) => ({
+                  usuarioId: v?.usuarioId || v?.id || 0,
+                  nome: v?.nome || 'Voluntário',
+                  instrumento: v?.instrumento || 'Louvor',
+                }))
+              : [],
+          };
+        })
+        .filter((item: EscalaMesDTO) => Boolean(item.data && item.data.length >= 8))
+        .sort(
+          (a, b) =>
+            new Date(a.data).getTime() - new Date(b.data).getTime()
+        );
+
+      setEscalas(listaNormalizada);
+    } catch (error) {
+      console.warn('Erro ao carregar escalas do mês:', error);
+      setEscalas([]);
+    } finally {
+      setCarregando(false);
+      setRecarregando(false);
+    }
+  }, [signed, mesAlvo, anoAlvo, user]);
+
+  useEffect(() => {
+    carregarEscalaMensal();
+  }, [carregarEscalaMensal]);
+
+  const onRefresh = () => {
+    setRecarregando(true);
+    carregarEscalaMensal();
+  };
+
+  const getIconeInstrumento = (instrumento: string) => {
+    const inst = (instrumento || '').toLowerCase();
+    if (
+      inst.includes('voz') ||
+      inst.includes('ministr') ||
+      inst.includes('canto') ||
+      inst.includes('vocal') ||
+      inst.includes('backing')
+    ) {
+      return <Mic size={14} color="#FF6B00" />;
+    }
+    return <Music size={14} color="#FF6B00" />;
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* SELETOR DE MÊS */}
+    <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitulo}>Escala Geral do Mês</Text>
-        <Text style={styles.headerCongregacao}>{user?.nomeEmpresa || 'Hope Escala Pro'}</Text>
-
-        <View style={styles.seletorMesContainer}>
-          <TouchableOpacity onPress={mesAnterior} style={styles.setaBtn}>
-            <ChevronLeft size={20} color="#0f172a" />
-          </TouchableOpacity>
-
-          <View style={styles.mesAtualBox}>
-            <CalendarDays size={16} color="#FF6B00" />
-            <Text style={styles.mesAtualTexto}>
-              {nomesMeses[mes - 1]} de {ano}
-            </Text>
-          </View>
-
-          <TouchableOpacity onPress={proximoMes} style={styles.setaBtn}>
-            <ChevronRight size={20} color="#0f172a" />
-          </TouchableOpacity>
+        <View>
+          <Text style={styles.headerTitulo}>Escala Mensal</Text>
+          <Text style={styles.headerSub}>Equipe escalada para cada culto</Text>
+        </View>
+        <View style={styles.badgeGeral}>
+          <Users size={14} color="#FF6B00" />
+          <Text style={styles.badgeGeralTexto}>Louvor</Text>
         </View>
       </View>
 
-      {/* LISTAGEM DOS DOMINGOS */}
+      {/* Seletor de Mês */}
+      <View style={styles.mesSelectorRow}>
+        <TouchableOpacity
+          style={styles.btnMesNav}
+          onPress={mesAnterior}
+          activeOpacity={0.7}
+        >
+          <ChevronLeft size={20} color="#FF6B00" />
+        </TouchableOpacity>
+
+        <View style={{ alignItems: 'center' }}>
+          <Text style={styles.mesSelectorTitulo}>
+            {nomesMesesCompletos[mesAlvo]} de {anoAlvo}
+          </Text>
+          <Text style={styles.mesSelectorRegra}>Cultos Dominicais</Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.btnMesNav}
+          onPress={proximoMes}
+          activeOpacity={0.7}
+        >
+          <ChevronRight size={20} color="#FF6B00" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Conteúdo */}
       {carregando ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#FF6B00" />
           <Text style={styles.carregandoTexto}>Carregando escalas do mês...</Text>
         </View>
+      ) : escalas.length === 0 ? (
+        <ScrollView
+          contentContainerStyle={styles.centerVazio}
+          refreshControl={
+            <RefreshControl
+              refreshing={recarregando}
+              onRefresh={onRefresh}
+              colors={['#FF6B00']}
+              tintColor="#FF6B00"
+            />
+          }
+        >
+          <AlertCircle size={44} color="#475569" />
+          <Text style={styles.vazioTitulo}>Nenhuma escala publicada</Text>
+          <Text style={styles.vazioSub}>
+            A escala oficial de {nomesMesesCompletos[mesAlvo]} de {anoAlvo} ainda não foi gerada ou não há voluntários vinculados.
+          </Text>
+        </ScrollView>
       ) : (
-        <FlatList
-          data={domingos}
-          keyExtractor={(item) => String(item.id || item.data)}
-          renderItem={renderDomingo}
-          contentContainerStyle={styles.listContent}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
@@ -282,76 +286,164 @@ export default function EscalaMensalScreen() {
               tintColor="#FF6B00"
             />
           }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Users size={40} color="#cbd5e1" />
-              <Text style={styles.emptyTitulo}>Nenhuma escala publicada</Text>
-              <Text style={styles.emptySubtitulo}>
-                A liderança ainda não publicou as escalas para {nomesMeses[mes - 1]} de {ano}.
-              </Text>
-            </View>
-          }
-        />
+        >
+          {escalas.map((escala) => {
+            const dataBox = formatarDataBox(escala.data);
+            const obs = (escala.observacao || '').toLowerCase();
+            const ehManha = obs.includes('manhã') || obs.includes('manha');
+
+            return (
+              <View key={escala.id} style={styles.cardEscala}>
+                {/* Topo do Card */}
+                <View style={styles.cardHeader}>
+                  <View style={styles.dataBox}>
+                    <Text style={styles.dataDia}>{dataBox.dia}</Text>
+                    <Text style={styles.dataMes}>{dataBox.mes}</Text>
+                  </View>
+
+                  <View style={styles.cultoInfo}>
+                    <View style={styles.cultoTipoRow}>
+                      {ehManha ? (
+                        <Sun size={15} color="#ea580c" />
+                      ) : (
+                        <Moon size={15} color="#FF6B00" />
+                      )}
+                      <Text style={styles.cultoNome} numberOfLines={1}>
+                        {escala.observacao || 'Culto de Celebração'}
+                      </Text>
+                    </View>
+                    <View style={styles.horarioRow}>
+                      <Clock size={12} color="#94a3b8" />
+                      <Text style={styles.horarioTexto}>
+                        {ehManha ? '09:00' : '19:00'} • Domingo
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Atalho para a Sala de Ensaio deste culto */}
+                  <TouchableOpacity
+                    style={styles.btnSalaEnsaio}
+                    onPress={() =>
+                      navigation.navigate('SalaEnsaio', { escalaId: escala.id })
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <Headphones size={15} color="#FF6B00" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Grade de Voluntários */}
+                <View style={styles.equipeContainer}>
+                  <View style={styles.equipeHeader}>
+                    <Users size={13} color="#94a3b8" />
+                    <Text style={styles.equipeHeaderTexto}>
+                      Equipe escalada ({escala.voluntarios.length})
+                    </Text>
+                  </View>
+
+                  {escala.voluntarios.length === 0 ? (
+                    <Text style={styles.semMusicosTexto}>Nenhum voluntário vinculado.</Text>
+                  ) : (
+                    <View style={styles.musicosGrid}>
+                      {escala.voluntarios.map((v, idx) => (
+                        <View key={`${v.usuarioId}-${idx}`} style={styles.musicoCard}>
+                          <View style={styles.musicoIconBox}>
+                            {getIconeInstrumento(v.instrumento)}
+                          </View>
+                          <View style={styles.musicoTextos}>
+                            <Text style={styles.musicoNome} numberOfLines={1}>
+                              {v.nome}
+                            </Text>
+                            <Text style={styles.musicoInstrumento} numberOfLines={1}>
+                              {v.instrumento}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#0f172a',
   },
   header: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#0f172a',
     paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 14,
+    paddingTop: 18,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    borderBottomColor: '#1e293b',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   headerTitulo: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
-    color: '#0f172a',
-    letterSpacing: -0.3,
+    color: '#ffffff',
   },
-  headerCongregacao: {
+  headerSub: {
     fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  badgeGeral: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 107, 0, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 0, 0.3)',
+  },
+  badgeGeralTexto: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FF6B00',
+  },
+  mesSelectorRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#1e293b',
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  btnMesNav: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mesSelectorTitulo: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  mesSelectorRegra: {
+    fontSize: 11,
     color: '#FF6B00',
     fontWeight: '700',
-    marginTop: 2,
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  seletorMesContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 14,
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  setaBtn: {
-    padding: 6,
-  },
-  mesAtualBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  mesAtualTexto: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  listContent: {
-    padding: 16,
-    gap: 16,
   },
   centerContainer: {
     flex: 1,
@@ -359,174 +451,164 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   carregandoTexto: {
-    marginTop: 10,
-    color: '#64748b',
+    marginTop: 12,
+    color: '#94a3b8',
     fontSize: 13,
   },
-  domingoCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#0f172a',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+  centerVazio: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    gap: 10,
   },
-  domingoHeader: {
+  vazioTitulo: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginTop: 6,
+  },
+  vazioSub: {
+    fontSize: 13,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  scrollContent: {
+    padding: 16,
+    gap: 16,
+    paddingBottom: 30,
+  },
+  cardEscala: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    overflow: 'hidden',
+  },
+  cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    padding: 14,
     gap: 12,
-    marginBottom: 14,
-    paddingBottom: 12,
+    backgroundColor: '#1e293b',
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    borderBottomColor: '#334155',
   },
-  dataBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#fff7ed',
-    borderWidth: 1,
-    borderColor: '#fed7aa',
+  dataBox: {
+    minWidth: 48,
+    minHeight: 48,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    borderWidth: 1.5,
+    borderColor: '#FF6B00',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dataBadgeDia: {
+  dataDia: {
     fontSize: 16,
-    fontWeight: '800',
-    color: '#c2410c',
-    lineHeight: 18,
+    fontWeight: '900',
+    color: '#FF6B00',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
-  dataBadgeMes: {
+  dataMes: {
     fontSize: 10,
-    fontWeight: '700',
-    color: '#ea580c',
-    letterSpacing: 0.5,
-  },
-  domingoHeaderInfo: {
-    flex: 1,
-  },
-  domingoTitulo: {
-    fontSize: 15,
     fontWeight: '800',
-    color: '#0f172a',
+    color: '#f97316',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
-  domingoSubtitulo: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 1,
+  cultoInfo: {
+    flex: 1,
+    gap: 3,
   },
-  cultosContainer: {
-    gap: 10,
-  },
-  cultoCard: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  cultoCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  cultoIconRow: {
+  cultoTipoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   cultoNome: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#0f172a',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
   },
-  horarioBadge: {
+  horarioRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#e2e8f0',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
   },
   horarioTexto: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#334155',
+    fontSize: 12,
+    color: '#94a3b8',
   },
-  ministroRow: {
+  btnSalaEnsaio: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 107, 0, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 0, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  equipeContainer: {
+    padding: 14,
+    gap: 10,
+  },
+  equipeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 8,
-    backgroundColor: '#f0fdf4',
-    padding: 6,
-    borderRadius: 8,
   },
-  ministroTexto: {
+  equipeHeaderTexto: {
     fontSize: 12,
-    color: '#15803d',
+    fontWeight: '700',
+    color: '#94a3b8',
+    textTransform: 'uppercase',
+  },
+  semMusicosTexto: {
+    fontSize: 12,
+    color: '#64748b',
+    fontStyle: 'italic',
   },
   musicosGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 4,
+    gap: 8,
   },
-  musicoChip: {
+  musicoCard: {
+    width: '48.5%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    padding: 8,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#334155',
+    gap: 8,
   },
-  musicoNome: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  musicoFuncao: {
-    fontSize: 10,
-    color: '#64748b',
-  },
-  semMusicosTexto: {
-    fontSize: 12,
-    color: '#94a3b8',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  emptyContainer: {
+  musicoIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255, 107, 0, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 60,
-    paddingHorizontal: 32,
   },
-  emptyTitulo: {
-    fontSize: 16,
+  musicoTextos: {
+    flex: 1,
+  },
+  musicoNome: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#334155',
-    marginTop: 12,
+    color: '#ffffff',
   },
-  emptySubtitulo: {
-    fontSize: 13,
+  musicoInstrumento: {
+    fontSize: 10,
     color: '#94a3b8',
-    textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 18,
+    marginTop: 1,
   },
 });

@@ -2,368 +2,798 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   ScrollView,
+  TouchableOpacity,
   ActivityIndicator,
   Alert,
   StyleSheet,
+  RefreshControl,
 } from 'react-native';
-import { mobileDataService } from '../../services/mobileDataService';
-import { CultoAgenda } from '../../types/escala';
+import {
+  CalendarCheck,
+  CalendarX,
+  AlertCircle,
+  Clock,
+  Sun,
+  Moon,
+  ChevronLeft,
+  ChevronRight,
+  Save,
+  CheckCircle2,
+  Lock,
+} from 'lucide-react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import api from '../../services/api';
 
-const MESES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-];
+interface DomingoItem {
+  data: string; // "yyyy-MM-dd"
+  dia: string;
+  mes: string;
+  disponivel: boolean;
+  periodo: 'NOITE' | 'MANHA' | 'AMBOS';
+  temCultoManha?: boolean;
+}
 
-export const DisponibilidadeScreen: React.FC = () => {
-  const hoje = new Date();
-  const mesPadrao = hoje.getDate() >= 15 ? (hoje.getMonth() + 2 > 12 ? 1 : hoje.getMonth() + 2) : hoje.getMonth() + 1;
-  const anoPadrao = hoje.getDate() >= 15 && hoje.getMonth() === 11 ? hoje.getFullYear() + 1 : hoje.getFullYear();
+export default function DisponibilidadeScreen() {
+  const { user, signed } = useAuth();
 
-  const [mes, setMes] = useState<number>(mesPadrao);
-  const [ano, setAno] = useState<number>(anoPadrao);
-  const [cultos, setCultos] = useState<CultoAgenda[]>([]);
-  const [datasMarcadas, setDatasMarcadas] = useState<string[]>([]);
   const [carregando, setCarregando] = useState<boolean>(true);
   const [salvando, setSalvando] = useState<boolean>(false);
+  const [recarregando, setRecarregando] = useState<boolean>(false);
 
-  const expirouPrazo = hoje.getDate() > 25 && mes === (hoje.getMonth() + 1) && ano === hoje.getFullYear();
+  // Inicia no mês e ano atuais
+  const hoje = new Date();
+  const [mesAlvo, setMesAlvo] = useState<number>(hoje.getMonth()); // 0 a 11
+  const [anoAlvo, setAnoAlvo] = useState<number>(hoje.getFullYear());
 
-  const carregarDados = useCallback(async () => {
+  const [domingos, setDomingos] = useState<DomingoItem[]>([]);
+  const [bloqueadoPorPrazo, setBloqueadoPorPrazo] = useState<boolean>(false);
+
+  const nomesMesesCompletos = [
+    'Janeiro',
+    'Fevereiro',
+    'Março',
+    'Abril',
+    'Maio',
+    'Junho',
+    'Julho',
+    'Agosto',
+    'Setembro',
+    'Outubro',
+    'Novembro',
+    'Dezembro',
+  ];
+
+  // Regra do dia 25: encerra edição se for para o próximo mês e já passou do dia 25
+  const checarPrazoLimite = useCallback(() => {
+    const diaAtual = hoje.getDate();
+    const mesAtual = hoje.getMonth();
+    const anoAtual = hoje.getFullYear();
+
+    // Mês seguinte no calendário
+    const ehProximoMes =
+      (anoAlvo === anoAtual && mesAlvo === mesAtual + 1) ||
+      (anoAlvo === anoAtual + 1 && mesAtual === 11 && mesAlvo === 0);
+
+    // Meses anteriores ao atual sempre ficam bloqueados
+    const ehMesPassado =
+      anoAlvo < anoAtual || (anoAlvo === anoAtual && mesAlvo < mesAtual);
+
+    if (ehMesPassado) {
+      setBloqueadoPorPrazo(true);
+    } else if (ehProximoMes && diaAtual > 25) {
+      setBloqueadoPorPrazo(true);
+    } else {
+      setBloqueadoPorPrazo(false);
+    }
+  }, [anoAlvo, mesAlvo]);
+
+  // Navegação entre meses
+  const mesAnterior = () => {
+    if (mesAlvo === 0) {
+      setMesAlvo(11);
+      setAnoAlvo((prev) => prev - 1);
+    } else {
+      setMesAlvo((prev) => prev - 1);
+    }
+  };
+
+  const proximoMes = () => {
+    if (mesAlvo === 11) {
+      setMesAlvo(0);
+      setAnoAlvo((prev) => prev + 1);
+    } else {
+      setMesAlvo((prev) => prev + 1);
+    }
+  };
+
+  // Gera apenas os domingos do mês selecionado
+  const gerarDomingosDoMes = useCallback((ano: number, mes: number) => {
+    const lista: DomingoItem[] = [];
+    const nomesMeses = [
+      'JAN',
+      'FEV',
+      'MAR',
+      'ABR',
+      'MAI',
+      'JUN',
+      'JUL',
+      'AGO',
+      'SET',
+      'OUT',
+      'NOV',
+      'DEZ',
+    ];
+    const totalDias = new Date(ano, mes + 1, 0).getDate();
+
+    for (let dia = 1; dia <= totalDias; dia++) {
+      const d = new Date(ano, mes, dia);
+      if (d.getDay() === 0) {
+        // 0 = Domingo
+        const diaStr = String(dia).padStart(2, '0');
+        const mesStr = String(mes + 1).padStart(2, '0');
+        lista.push({
+          data: `${ano}-${mesStr}-${diaStr}`,
+          dia: diaStr,
+          mes: nomesMeses[mes],
+          disponivel: true, // Padrão: disponível
+          periodo: 'NOITE', // Padrão dominical
+          temCultoManha: false,
+        });
+      }
+    }
+    return lista;
+  }, []);
+
+  // Busca as datas salvas no Spring Boot (GET /disponibilidades/mes)
+  const carregarDisponibilidade = useCallback(async () => {
+    if (!signed) return;
     try {
       setCarregando(true);
-      const [cultosRes, marcadasRes] = await Promise.all([
-        mobileDataService.obterCultosDoMes(mes, ano),
-        mobileDataService.obterMinhasDatasDisponiveis(mes, ano),
-      ]);
-      setCultos(cultosRes);
-      setDatasMarcadas(marcadasRes);
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Erro', 'Não foi possível carregar a agenda do mês selecionado.');
+      checarPrazoLimite();
+
+      const domingosBase = gerarDomingosDoMes(anoAlvo, mesAlvo);
+
+      const response = await api.get<any[]>('/disponibilidades/mes', {
+        params: {
+          mes: mesAlvo + 1,
+          ano: anoAlvo,
+        },
+      });
+
+      const datasSalvas = response.data || [];
+
+      if (Array.isArray(datasSalvas) && datasSalvas.length > 0) {
+        const datasFormatadas = datasSalvas.map((item: any) => {
+          if (typeof item === 'string') return item.split('T')[0];
+          if (Array.isArray(item) && item.length >= 3) {
+            const a = item[0];
+            const m = String(item[1]).padStart(2, '0');
+            const d = String(item[2]).padStart(2, '0');
+            return `${a}-${m}-${d}`;
+          }
+          return '';
+        });
+
+        const mesclado = domingosBase.map((dom) => ({
+          ...dom,
+          disponivel: datasFormatadas.includes(dom.data),
+        }));
+
+        setDomingos(mesclado);
+      } else {
+        setDomingos(domingosBase);
+      }
+    } catch (error) {
+      console.warn('Erro ao buscar disponibilidade, gerando base local:', error);
+      setDomingos(gerarDomingosDoMes(anoAlvo, mesAlvo));
     } finally {
       setCarregando(false);
+      setRecarregando(false);
     }
-  }, [mes, ano]);
+  }, [signed, anoAlvo, mesAlvo, checarPrazoLimite, gerarDomingosDoMes]);
 
   useEffect(() => {
-    carregarDados();
-  }, [carregarDados]);
+    carregarDisponibilidade();
+  }, [carregarDisponibilidade]);
 
-  const toggleData = (dataStr: string) => {
-    setDatasMarcadas((prev) =>
-      prev.includes(dataStr) ? prev.filter((d) => d !== dataStr) : [...prev, dataStr]
+  const onRefresh = () => {
+    setRecarregando(true);
+    carregarDisponibilidade();
+  };
+
+  const toggleDisponibilidade = (index: number) => {
+    if (bloqueadoPorPrazo) {
+      Alert.alert(
+        'Prazo Encerrado',
+        'As disponibilidades para este mês foram encerradas no dia 25. Fale com a liderança.'
+      );
+      return;
+    }
+    setDomingos((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, disponivel: !item.disponivel } : item))
     );
   };
 
-  const handleSalvar = async () => {
+  const alterarPeriodo = (index: number, periodo: 'NOITE' | 'MANHA' | 'AMBOS') => {
+    if (bloqueadoPorPrazo) return;
+    setDomingos((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, periodo } : item))
+    );
+  };
+
+  // Salva a lista de LocalDate no Spring Boot (POST /disponibilidades/salvar-lote)
+  const salvarDisponibilidade = async () => {
+    if (bloqueadoPorPrazo) {
+      Alert.alert('Atenção', 'O período de edição já foi encerrado pelo prazo limite (dia 25).');
+      return;
+    }
+
     try {
       setSalvando(true);
-      await mobileDataService.salvarDisponibilidade(mes, ano, datasMarcadas);
-      Alert.alert('Sucesso', 'Sua disponibilidade foi registrada com sucesso!');
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Falha', 'Não foi possível salvar sua disponibilidade.');
+
+      const datasDisponiveis: string[] = domingos
+        .filter((d) => d.disponivel)
+        .map((d) => d.data);
+
+      await api.post('/disponibilidades/salvar-lote', datasDisponiveis, {
+        params: {
+          mes: mesAlvo + 1,
+          ano: anoAlvo,
+        },
+      });
+
+      Alert.alert('Sucesso!', 'Sua disponibilidade foi salva com sucesso.');
+    } catch (error: any) {
+      console.error('Erro ao salvar disponibilidade:', error.response?.data || error.message);
+      Alert.alert(
+        'Erro ao Salvar',
+        error.response?.data?.message || 'Não foi possível salvar na nuvem agora. Tente novamente.'
+      );
     } finally {
       setSalvando(false);
     }
   };
 
-  const mudarMes = (direcao: 'ant' | 'prox') => {
-    if (direcao === 'ant') {
-      if (mes === 1) {
-        setMes(12);
-        setAno((prev) => prev - 1);
-      } else {
-        setMes((prev) => prev - 1);
-      }
-    } else {
-      if (mes === 12) {
-        setMes(1);
-        setAno((prev) => prev + 1);
-      } else {
-        setMes((prev) => prev + 1);
-      }
-    }
-  };
-
-  const formatarDia = (dataStr: string) => {
-    const partes = dataStr.split('-');
-    if (partes.length === 3) {
-      return { dia: partes[2], mes: partes[1] };
-    }
-    return { dia: '--', mes: '--' };
-  };
-
   return (
     <View style={styles.container}>
-      {/* CABEÇALHO DO MÊS */}
-      <View style={styles.navBar}>
-        <TouchableOpacity style={styles.navBtn} onPress={() => mudarMes('ant')}>
-          <Text style={styles.navBtnText}>{'◀'}</Text>
-        </TouchableOpacity>
-        <View style={styles.navCenter}>
-          <Text style={styles.navMes}>{MESES[mes - 1]} / {ano}</Text>
-          <Text style={styles.navSub}>{datasMarcadas.length} culto(s) selecionado(s)</Text>
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerTitulo}>Disponibilidade</Text>
+          <Text style={styles.headerSub}>Domingos em que você pode servir</Text>
         </View>
-        <TouchableOpacity style={styles.navBtn} onPress={() => mudarMes('prox')}>
-          <Text style={styles.navBtnText}>{'▶'}</Text>
+        <View style={styles.badgePrazo}>
+          <Clock size={13} color="#f59e0b" />
+          <Text style={styles.badgePrazoTexto}>Até dia 25</Text>
+        </View>
+      </View>
+
+      {/* Seletor de Mês com Navegação */}
+      <View style={styles.mesSelectorRow}>
+        <TouchableOpacity
+          style={styles.btnMesNav}
+          onPress={mesAnterior}
+          activeOpacity={0.7}
+        >
+          <ChevronLeft size={20} color="#FF6B00" />
+        </TouchableOpacity>
+
+        <View style={{ alignItems: 'center' }}>
+          <Text style={styles.mesSelectorTitulo}>
+            {nomesMesesCompletos[mesAlvo]} de {anoAlvo}
+          </Text>
+          <Text style={styles.mesSelectorRegra}>Apenas Domingos</Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.btnMesNav}
+          onPress={proximoMes}
+          activeOpacity={0.7}
+        >
+          <ChevronRight size={20} color="#FF6B00" />
         </TouchableOpacity>
       </View>
 
-      {/* REGRA DO DIA 25 */}
-      {expirouPrazo && (
-        <View style={styles.alertaPrazo}>
-          <Text style={styles.alertaTitulo}>Atenção: Prazo do dia 25 expirado</Text>
-          <Text style={styles.alertaDesc}>
-            O gerador considerará o fallback de voluntários ativos caso necessário.
-          </Text>
+      {/* Alerta de Status do Prazo (Regra do dia 25) */}
+      {bloqueadoPorPrazo ? (
+        <View style={styles.avisoBloqueado}>
+          <Lock size={18} color="#ef4444" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.avisoBloqueadoTitulo}>Prazo limite encerrado (dia 25)</Text>
+            <Text style={styles.avisoBloqueadoTexto}>
+              O fallback automático foi ativado para este mês. Alterações devem ser solicitadas à liderança.
+            </Text>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.avisoAberto}>
+          <AlertCircle size={18} color="#22c55e" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.avisoAbertoTitulo}>Disponibilidade Aberta</Text>
+            <Text style={styles.avisoAbertoTexto}>
+              Marque os domingos que pode tocar. Desmarque caso tenha viagens ou imprevistos.
+            </Text>
+          </View>
         </View>
       )}
 
-      {/* LISTAGEM DE CULTOS */}
+      {/* Lista de Domingos */}
       {carregando ? (
-        <View style={styles.center}>
+        <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#FF6B00" />
-          <Text style={styles.carregandoText}>Carregando datas de cultos...</Text>
+          <Text style={styles.carregandoTexto}>Carregando domingos...</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.lista}>
-          {cultos.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                Nenhum culto configurado na agenda para {MESES[mes - 1]} de {ano}.
-              </Text>
-            </View>
-          ) : (
-            cultos.map((culto) => {
-              const selecionado = datasMarcadas.includes(culto.data);
-              const dataFormatada = formatarDia(culto.data);
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={recarregando}
+              onRefresh={onRefresh}
+              colors={['#FF6B00']}
+              tintColor="#FF6B00"
+            />
+          }
+        >
+          {domingos.map((item, index) => (
+            <View
+              key={item.data}
+              style={[
+                styles.cardDomingo,
+                !item.disponivel && styles.cardDomingoIndisponivel,
+              ]}
+            >
+              <View style={styles.cardTopRow}>
+                {/* Data Box formatado */}
+                <View
+                  style={[
+                    styles.dataBox,
+                    !item.disponivel && styles.dataBoxIndisponivel,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dataDia,
+                      !item.disponivel && styles.dataDiaIndisponivel,
+                    ]}
+                  >
+                    {item.dia}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.dataMes,
+                      !item.disponivel && styles.dataMesIndisponivel,
+                    ]}
+                  >
+                    {item.mes}
+                  </Text>
+                </View>
 
-              return (
+                {/* Informação do Domingo */}
+                <View style={styles.domingoInfo}>
+                  <Text style={styles.domingoTitulo}>Domingo de Celebração</Text>
+                  <Text style={styles.domingoStatus}>
+                    {item.disponivel ? 'Disponível para escalar' : 'Indisponível neste dia'}
+                  </Text>
+                </View>
+
+                {/* Botão de Toggle */}
                 <TouchableOpacity
-                  key={culto.data}
-                  style={[styles.card, selecionado && styles.cardSelecionado]}
-                  onPress={() => toggleData(culto.data)}
+                  style={[
+                    styles.btnToggle,
+                    item.disponivel ? styles.btnToggleAtivo : styles.btnToggleInativo,
+                  ]}
+                  onPress={() => toggleDisponibilidade(index)}
+                  disabled={bloqueadoPorPrazo}
                   activeOpacity={0.8}
                 >
-                  <View style={[styles.dataBadge, selecionado && styles.dataBadgeSelecionado]}>
-                    <Text style={[styles.dataDia, selecionado && styles.dataDiaSelecionado]}>
-                      {dataFormatada.dia}
-                    </Text>
-                    <Text style={[styles.dataMes, selecionado && styles.dataMesSelecionado]}>
-                      DOM
-                    </Text>
-                  </View>
-
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardTitulo}>{culto.nome || 'Culto de Celebração'}</Text>
-                    <Text style={styles.cardHorario}>{culto.horario || 'Domingo'}</Text>
-                  </View>
-
-                  <View style={[styles.checkCircle, selecionado && styles.checkCircleAtivo]}>
-                    {selecionado && <Text style={styles.checkText}>✓</Text>}
-                  </View>
+                  {item.disponivel ? (
+                    <CalendarCheck size={18} color="#22c55e" />
+                  ) : (
+                    <CalendarX size={18} color="#ef4444" />
+                  )}
+                  <Text
+                    style={[
+                      styles.btnToggleTexto,
+                      item.disponivel ? styles.btnToggleTextoAtivo : styles.btnToggleTextoInativo,
+                    ]}
+                  >
+                    {item.disponivel ? 'SIM' : 'NÃO'}
+                  </Text>
                 </TouchableOpacity>
-              );
-            })
-          )}
+              </View>
+
+              {/* Seletor de Período (Apenas quando disponível) */}
+              {item.disponivel && (
+                <View style={styles.periodosContainer}>
+                  <Text style={styles.periodosLabel}>Culto pretendido:</Text>
+                  <View style={styles.periodosRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.periodoBtn,
+                        item.periodo === 'NOITE' && styles.periodoBtnAtivo,
+                      ]}
+                      onPress={() => alterarPeriodo(index, 'NOITE')}
+                      disabled={bloqueadoPorPrazo}
+                    >
+                      <Moon
+                        size={13}
+                        color={item.periodo === 'NOITE' ? '#ffffff' : '#94a3b8'}
+                      />
+                      <Text
+                        style={[
+                          styles.periodoBtnTexto,
+                          item.periodo === 'NOITE' && styles.periodoBtnTextoAtivo,
+                        ]}
+                      >
+                        Noite (19h)
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.periodoBtn,
+                        item.periodo === 'MANHA' && styles.periodoBtnAtivo,
+                      ]}
+                      onPress={() => alterarPeriodo(index, 'MANHA')}
+                      disabled={bloqueadoPorPrazo}
+                    >
+                      <Sun
+                        size={13}
+                        color={item.periodo === 'MANHA' ? '#ffffff' : '#94a3b8'}
+                      />
+                      <Text
+                        style={[
+                          styles.periodoBtnTexto,
+                          item.periodo === 'MANHA' && styles.periodoBtnTextoAtivo,
+                        ]}
+                      >
+                        Manhã
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.periodoBtn,
+                        item.periodo === 'AMBOS' && styles.periodoBtnAtivo,
+                      ]}
+                      onPress={() => alterarPeriodo(index, 'AMBOS')}
+                      disabled={bloqueadoPorPrazo}
+                    >
+                      <CheckCircle2
+                        size={13}
+                        color={item.periodo === 'AMBOS' ? '#ffffff' : '#94a3b8'}
+                      />
+                      <Text
+                        style={[
+                          styles.periodoBtnTexto,
+                          item.periodo === 'AMBOS' && styles.periodoBtnTextoAtivo,
+                        ]}
+                      >
+                        Ambos
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+          ))}
         </ScrollView>
       )}
 
-      {/* BOTÃO FIXO DE SALVAR */}
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.btnSalvar, salvando && styles.btnDisabled]}
-          disabled={salvando || carregando}
-          onPress={handleSalvar}
-        >
-          {salvando ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.btnSalvarText}>
-              Salvar Disponibilidade ({datasMarcadas.length})
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
+      {/* Botão Flutuante de Salvar */}
+      {!bloqueadoPorPrazo && (
+        <View style={styles.footerSalvar}>
+          <TouchableOpacity
+            style={styles.btnSalvar}
+            onPress={salvarDisponibilidade}
+            disabled={salvando || carregando}
+            activeOpacity={0.8}
+          >
+            {salvando ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <>
+                <Save size={18} color="#ffffff" />
+                <Text style={styles.btnSalvarTexto}>Confirmar Disponibilidade</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
-};
-
-export default DisponibilidadeScreen;
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0f172a',
   },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
+  header: {
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 12,
   },
-  carregandoText: {
-    color: '#94a3b8',
+  headerTitulo: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  headerSub: {
     fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
   },
-  navBar: {
+  badgePrazo: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  badgePrazoTexto: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#f59e0b',
+  },
+  mesSelectorRow: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     backgroundColor: '#1e293b',
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
   },
-  navBtn: {
-    padding: 10,
-    backgroundColor: '#0f172a',
-    borderRadius: 8,
-  },
-  navBtnText: {
-    color: '#FF6B00',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  navCenter: {
-    alignItems: 'center',
-  },
-  navMes: {
-    color: '#f8fafc',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  navSub: {
-    color: '#94a3b8',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  alertaPrazo: {
-    margin: 16,
-    padding: 12,
-    backgroundColor: '#451a03',
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#f59e0b',
-  },
-  alertaTitulo: {
-    color: '#fbbf24',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  alertaDesc: {
-    color: '#fde68a',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  lista: {
-    padding: 16,
-    gap: 12,
-  },
-  emptyContainer: {
-    padding: 32,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: '#64748b',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: '#334155',
-  },
-  cardSelecionado: {
-    borderColor: '#FF6B00',
-    backgroundColor: '#1c1917',
-  },
-  dataBadge: {
-    width: 48,
-    height: 48,
+  btnMesNav: {
+    width: 36,
+    height: 36,
     borderRadius: 10,
     backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dataBadgeSelecionado: {
-    backgroundColor: '#FF6B00',
+  mesSelectorTitulo: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  mesSelectorRegra: {
+    fontSize: 11,
+    color: '#FF6B00',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  avisoAberto: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    margin: 16,
+    marginBottom: 8,
+    padding: 12,
+    backgroundColor: 'rgba(34, 197, 94, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.25)',
+    borderRadius: 12,
+  },
+  avisoAbertoTitulo: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#22c55e',
+  },
+  avisoAbertoTexto: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  avisoBloqueado: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    margin: 16,
+    marginBottom: 8,
+    padding: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderRadius: 12,
+  },
+  avisoBloqueadoTitulo: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ef4444',
+  },
+  avisoBloqueadoTexto: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  carregandoTexto: {
+    marginTop: 12,
+    color: '#94a3b8',
+    fontSize: 13,
+  },
+  scrollContent: {
+    padding: 16,
+    gap: 12,
+    paddingBottom: 90,
+  },
+  cardDomingo: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    padding: 14,
+    gap: 12,
+  },
+  cardDomingoIndisponivel: {
+    opacity: 0.65,
+    borderColor: '#1e293b',
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  dataBox: {
+    minWidth: 50,
+    minHeight: 50,
+    paddingVertical: 5,
+    paddingHorizontal: 4,
+    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderWidth: 1.5,
+    borderColor: '#FF6B00',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dataBoxIndisponivel: {
+    borderColor: '#475569',
   },
   dataDia: {
-    color: '#f8fafc',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#FF6B00',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
-  dataDiaSelecionado: {
-    color: '#ffffff',
+  dataDiaIndisponivel: {
+    color: '#64748b',
   },
   dataMes: {
-    color: '#94a3b8',
-    fontSize: 9,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#f97316',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
-  dataMesSelecionado: {
+  dataMesIndisponivel: {
+    color: '#475569',
+  },
+  domingoInfo: {
+    flex: 1,
+  },
+  domingoTitulo: {
+    fontSize: 14,
+    fontWeight: '700',
     color: '#ffffff',
   },
-  cardInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  cardTitulo: {
-    color: '#f8fafc',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  cardHorario: {
+  domingoStatus: {
+    fontSize: 12,
     color: '#94a3b8',
-    fontSize: 11,
     marginTop: 2,
   },
-  checkCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#475569',
+  btnToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  btnToggleAtivo: {
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+    borderColor: '#22c55e',
+  },
+  btnToggleInativo: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderColor: '#ef4444',
+  },
+  btnToggleTexto: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  btnToggleTextoAtivo: {
+    color: '#22c55e',
+  },
+  btnToggleTextoInativo: {
+    color: '#ef4444',
+  },
+  periodosContainer: {
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    gap: 8,
+  },
+  periodosLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontWeight: '600',
+  },
+  periodosRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  periodoBtn: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#0f172a',
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
-  checkCircleAtivo: {
+  periodoBtnAtivo: {
     backgroundColor: '#FF6B00',
     borderColor: '#FF6B00',
   },
-  checkText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: 'bold',
+  periodoBtnTexto: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94a3b8',
   },
-  footer: {
-    padding: 16,
-    backgroundColor: '#1e293b',
+  periodoBtnTextoAtivo: {
+    color: '#ffffff',
+  },
+  footerSalvar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#0f172a',
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: '#1e293b',
+    padding: 16,
   },
   btnSalvar: {
     backgroundColor: '#FF6B00',
-    borderRadius: 12,
-    paddingVertical: 14,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
   },
-  btnDisabled: {
-    opacity: 0.6,
-  },
-  btnSalvarText: {
+  btnSalvarTexto: {
     color: '#ffffff',
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });
