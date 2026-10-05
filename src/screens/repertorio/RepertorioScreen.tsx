@@ -15,7 +15,7 @@ import {
 import {
   Music2,
   Calendar,
-  Youtube,
+  Video,
   FileText,
   X,
   Sun,
@@ -302,7 +302,7 @@ export default function RepertorioScreen() {
                 style={styles.btnYoutubePlaylist}
                 onPress={() => abrirLinkExterno(escalaSelecionada.urlPlaylist)}
               >
-                <Youtube size={14} color="#ffffff" />
+                <Video size={14} color="#ffffff" />
                 <Text style={styles.btnYoutubeTexto}>Playlist</Text>
               </TouchableOpacity>
             )}
@@ -363,7 +363,7 @@ export default function RepertorioScreen() {
                       style={styles.btnIconeAcao}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Youtube size={17} color="#ef4444" />
+                      <Video size={17} color="#ef4444" />
                     </TouchableOpacity>
                   )}
 
@@ -454,7 +454,7 @@ export default function RepertorioScreen() {
                   style={[styles.modalBtn, styles.modalBtnYoutube]}
                   onPress={() => abrirLinkExterno(musicaDetalhe?.linkYoutube)}
                 >
-                  <Youtube size={16} color="#ffffff" />
+                  <Video size={16} color="#ffffff" />
                   <Text style={styles.modalBtnTexto}>YouTube</Text>
                 </TouchableOpacity>
               )}

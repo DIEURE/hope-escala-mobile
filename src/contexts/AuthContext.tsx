@@ -1,117 +1,120 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
-import { AuthContextData, UsuarioLogado } from '../types/auth';
+
+export interface UsuarioLogado {
+  id: number;
+  nome: string;
+  email: string;
+  telefone?: string;
+  role?: string;
+  departamentoId?: number;
+  empresaId?: number;
+  nomeEmpresa?: string;
+  fotoUrl?: string;
+  instrumento?: string;
+}
+
+export interface AuthContextData {
+  signed: boolean;
+  user: UsuarioLogado | null;
+  token: string | null;
+  loading: boolean;
+  login: (emailOuDados: string | any, senha?: string) => Promise<void>;
+  logout: () => Promise<void>;
+  updateUser: (novoUsuario: Partial<UsuarioLogado>) => Promise<void>;
+}
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UsuarioLogado | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Restaura sessão salva ao iniciar o app
-  useEffect(() => {
-    async function carregarDadosSalvos() {
-      try {
-        let tokenSalvo = await AsyncStorage.getItem('@hope_token');
-        let userSalvo = await AsyncStorage.getItem('@hope_user');
+  const getArmazenamento = async (chave: string): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      return typeof window !== 'undefined' ? localStorage.getItem(chave) : null;
+    }
+    return await AsyncStorage.getItem(chave);
+  };
 
-        if (!tokenSalvo && typeof window !== 'undefined' && window.localStorage) {
-          tokenSalvo = window.localStorage.getItem('@hope_token');
-          userSalvo = window.localStorage.getItem('@hope_user');
-        }
+  const setArmazenamento = async (chave: string, valor: string): Promise<void> => {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') localStorage.setItem(chave, valor);
+      return;
+    }
+    await AsyncStorage.setItem(chave, valor);
+  };
+
+  const removeArmazenamento = async (chave: string): Promise<void> => {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') localStorage.removeItem(chave);
+      return;
+    }
+    await AsyncStorage.removeItem(chave);
+  };
+
+  useEffect(() => {
+    async function carregarSessao() {
+      try {
+        const tokenSalvo = await getArmazenamento('@HopeEscala:token');
+        const userSalvo = await getArmazenamento('@HopeEscala:user');
 
         if (tokenSalvo && userSalvo) {
-          const usuarioObjeto: UsuarioLogado = JSON.parse(userSalvo);
-          setToken(tokenSalvo);
-          setUser(usuarioObjeto);
           api.defaults.headers.common['Authorization'] = `Bearer ${tokenSalvo}`;
+          setToken(tokenSalvo);
+          setUser(JSON.parse(userSalvo));
         }
-      } catch (err) {
-        console.error('Erro ao restaurar sessão salva:', err);
+      } catch (error) {
+        console.warn('Erro ao carregar dados de autenticação:', error);
       } finally {
         setLoading(false);
       }
     }
 
-    carregarDadosSalvos();
+    carregarSessao();
   }, []);
 
-  const login = async (loginOuEmail: string, senha: string): Promise<void> => {
-    try {
-      const payload = {
-        email: loginOuEmail.trim(),
-        senha: senha,
-      };
+  const login = async (emailOuDados: string | any, senha?: string) => {
+    let novoToken: string;
+    let usuario: UsuarioLogado;
 
-      const response = await api.post<any>('/auth/login', payload);
-      const data = response.data;
-      const jwtToken = data.token;
-
-      if (!jwtToken) {
-        throw new Error('Token JWT não recebido do servidor.');
-      }
-
-      // Mapeia exatamente com a resposta da sua API
-      const usuarioLogado: UsuarioLogado = {
-        id: data.id || (data.usuario && data.usuario.id) || 0,
-        nome: data.nome || (data.usuario && data.usuario.nome) || 'Voluntário',
-        email: data.email || (data.usuario && data.usuario.email) || loginOuEmail,
-        empresaId: data.empresaId || (data.usuario && data.usuario.empresaId),
-        nomeEmpresa: data.nomeEmpresa || (data.usuario && data.usuario.nomeEmpresa) || 'Hope Escala Pro',
-        role: data.perfil || data.role || 'MINISTRO',
-      };
-
-      // 1. Configura o cabeçalho padrão para as próximas requisições
-      api.defaults.headers.common['Authorization'] = `Bearer ${jwtToken}`;
-
-      // 2. ATUALIZA O ESTADO IMEDIATAMENTE (dispara a troca de rota no React)
-      setToken(jwtToken);
-      setUser(usuarioLogado);
-
-      // 3. Salva no Storage em background (sem travar a navegação)
-      AsyncStorage.setItem('@hope_token', jwtToken).catch(console.error);
-      AsyncStorage.setItem('@hope_user', JSON.stringify(usuarioLogado)).catch(console.error);
-
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('@hope_token', jwtToken);
-        window.localStorage.setItem('@hope_user', JSON.stringify(usuarioLogado));
-      }
-    } catch (error: any) {
-      console.error('Erro no login:', error.response?.data || error.message);
-      throw error;
+    if (typeof emailOuDados === 'string' && senha !== undefined) {
+      const response = await api.post('/auth/login', {
+        email: emailOuDados,
+        senha,
+      });
+      novoToken = response.data.token;
+      usuario = response.data.usuario || response.data.user || response.data;
+    } else {
+      novoToken = emailOuDados.token;
+      usuario = emailOuDados.usuario || emailOuDados.user;
     }
+
+    api.defaults.headers.common['Authorization'] = `Bearer ${novoToken}`;
+
+    await setArmazenamento('@HopeEscala:token', novoToken);
+    await setArmazenamento('@HopeEscala:user', JSON.stringify(usuario));
+
+    setToken(novoToken);
+    setUser(usuario);
   };
 
-  const updateUser = (novoUsuario: UsuarioLogado) => {
-  setUser(novoUsuario);
-  if (Platform.OS === 'web') {
-    localStorage.setItem('@HopeEscala:user', JSON.stringify(novoUsuario));
-  } else {
-    AsyncStorage.setItem('@HopeEscala:user', JSON.stringify(novoUsuario));
-  }
-};
+  const logout = async () => {
+    delete api.defaults.headers.common['Authorization'];
+    await removeArmazenamento('@HopeEscala:token');
+    await removeArmazenamento('@HopeEscala:user');
+    setToken(null);
+    setUser(null);
+  };
 
-
-  const logout = async (): Promise<void> => {
-    try {
-      setLoading(true);
-      await AsyncStorage.multiRemove(['@hope_token', '@hope_user']);
-
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.removeItem('@hope_token');
-        window.localStorage.removeItem('@hope_user');
-      }
-
-      delete api.defaults.headers.common['Authorization'];
-      setUser(null);
-      setToken(null);
-    } catch (err) {
-      console.error('Erro ao deslogar:', err);
-    } finally {
-      setLoading(false);
-    }
+  const updateUser = async (novosDados: Partial<UsuarioLogado>) => {
+    if (!user) return;
+    const usuarioAtualizado = { ...user, ...novosDados };
+    await setArmazenamento('@HopeEscala:user', JSON.stringify(usuarioAtualizado));
+    setUser(usuarioAtualizado);
   };
 
   return (
@@ -123,6 +126,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loading,
         login,
         logout,
+        updateUser,
       }}
     >
       {children}
@@ -130,10 +134,4 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
-export function useAuth(): AuthContextData {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth deve ser utilizado dentro de um AuthProvider');
-  }
-  return context;
-}
+export const useAuth = () => useContext(AuthContext);

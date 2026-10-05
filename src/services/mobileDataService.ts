@@ -41,17 +41,20 @@ export const mobileDataService = {
       }
 
       // Normaliza os campos para a tela de ensaio
+
+ 
       return dados.map((item: any, index: number) => ({
-        id: item.id || item.musicaId || index,
-        escalaId: item.escalaId || escalaId,
-        nomeMusica: item.nomeMusica || item.titulo || item.nome || 'Sem título',
-        cantor: item.cantor || item.artista || item.ministro || 'Ministério de Louvor',
-        tom: item.tom || item.tonalidade || '',
-        bpm: item.bpm ? Number(item.bpm) : 72,
+        id: item.id,
+        musicaId: item.musicaId || item.id, // <-- Linha adicionada para satisfazer MusicaRepertorio
+        escalaId: item.escalaId,
+        nomeMusica: item.nomeMusica,
+        cantor: item.cantor,
+        tom: item.tom,
+        bpm: Number(item.bpm) || 0,
         ordem: item.ordem ?? index + 1,
-        youtubeVideoId: item.youtubeVideoId || item.youtubeUrl || item.linkYoutube || null,
-        cifraUrl: item.cifraUrl || item.cifraLink || item.linkCifra || null,
-        cifra: item.cifra || item.letra || null,
+        youtubeVideoId: item.youtubeVideoId,
+        cifraUrl: item.cifraUrl,
+        cifra: item.cifra,
       }));
     } catch (error) {
       console.error(`[Mobile] Erro ao carregar repertório da escala #${escalaId}:`, error);

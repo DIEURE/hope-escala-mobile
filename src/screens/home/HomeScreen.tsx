@@ -24,6 +24,7 @@ import {
   Moon,
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../services/api';
 
@@ -42,6 +43,7 @@ interface ProximaEscalaDTO {
 export default function HomeScreen() {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
 
   const [proximaEscala, setProximaEscala] = useState<ProximaEscalaDTO | null>(null);
   const [carregando, setCarregando] = useState<boolean>(true);
@@ -50,7 +52,6 @@ export default function HomeScreen() {
   const carregarDadosHome = useCallback(async () => {
     try {
       setCarregando(true);
-      // Busca as escalas do músico
       const response = await api.get<any>('/escala-musicos/minhas-escalas');
       const dados = response.data;
 
@@ -58,7 +59,6 @@ export default function HomeScreen() {
         const hoje = new Date();
         hoje.setHours(0, 0, 0, 0);
 
-        // Filtra escalas de hoje em diante e ordena cronologicamente
         const futuras = dados
           .map((item: any) => {
             let dataResolvida = '';
@@ -102,30 +102,28 @@ export default function HomeScreen() {
     }
   }, []);
 
-useEffect(() => {
-  let ativo = true;
+  useEffect(() => {
+    let ativo = true;
 
-  const iniciar = async () => {
-    // Dá 150ms para garantir que o AsyncStorage e o context estejam prontos
-    await new Promise((r) => setTimeout(r, 150));
-    if (ativo) {
-      carregarDadosHome();
-    }
-  };
+    const iniciar = async () => {
+      await new Promise((r) => setTimeout(r, 150));
+      if (ativo) {
+        carregarDadosHome();
+      }
+    };
 
-  iniciar();
+    iniciar();
 
-  return () => {
-    ativo = false;
-  };
-}, [carregarDadosHome]);
+    return () => {
+      ativo = false;
+    };
+  }, [carregarDadosHome]);
 
   const onRefresh = () => {
     setRecarregando(true);
     carregarDadosHome();
   };
 
-  // Cálculo de dias restantes até a escala
   const calcularDiasRestantes = (dataStr: string) => {
     if (!dataStr) return null;
     const hoje = new Date();
@@ -153,8 +151,8 @@ useEffect(() => {
 
   return (
     <View style={styles.container}>
-      {/* Header Fixo */}
-      <View style={styles.header}>
+      {/* Header Fixo com respeito à barra de status */}
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) + 6 }]}>
         <View>
           <Text style={styles.saudacao}>Olá, {primeiroNome} 👋</Text>
           <Text style={styles.empresa}>{user?.nomeEmpresa || 'Hope Escala Pro'}</Text>
@@ -169,7 +167,10 @@ useEffect(() => {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(insets.bottom, 16) + 32 },
+        ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -278,7 +279,7 @@ useEffect(() => {
           <View style={styles.gridAtalhos}>
             <TouchableOpacity
               style={styles.cardAtalho}
-              onPress={() => navigation.navigate('MinhasEscalas')}
+              onPress={() => navigation.navigate('Escalas')}
               activeOpacity={0.8}
             >
               <View style={[styles.atalhoIconeBox, { backgroundColor: 'rgba(255, 107, 0, 0.15)' }]}>
@@ -314,7 +315,6 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: '#0f172a',
     paddingHorizontal: 20,
-    paddingTop: 18,
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
